@@ -1,36 +1,41 @@
-module.exports = async function (context, req) {
-    const { Username, Password } = req.body || {};
+const { app } = require('@azure/functions');
 
-    if (!Username || !Password) {
-        context.res = {
-            status: 400,
-            body: { error: "Username and Password are required." }
+app.http('LoginFunction', {
+    methods: ['POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        const { Username, Password } = await request.json();
+
+        if (!Username || !Password) {
+            return {
+                status: 400,
+                jsonBody: { error: "Username and Password are required." }
+            };
+        }
+
+        const API_URL = 'https://login.microsoftonline.com/common/oauth2/token'; // Must use HTTPS
+        const HEADERS = {
+            'Content-Type': 'application/json'
         };
-        return;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: HEADERS,
+                body: JSON.stringify({ Username, Password })
+            });
+
+            const data = await response.json();
+
+            return {
+                status: response.status,
+                jsonBody: data
+            };
+        } catch (error) {
+            return {
+                status: 500,
+                jsonBody: { error: error.message }
+            };
+        }
     }
-
-    const API_URL = 'https://apa-uat-2.hazeltree.com/PublicApi/api/v1/Login/apa';
-    const HEADERS = {
-        'Content-Type': 'application/json'
-    };
-
-    try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: HEADERS,
-            body: JSON.stringify({ Username, Password })
-        });
-
-        const data = await response.json();
-
-        context.res = {
-            status: response.status,
-            body: data
-        };
-    } catch (error) {
-        context.res = {
-            status: 500,
-            body: { error: error.message }
-        };
-    }
-};
+});
