@@ -103,3 +103,23 @@ app.http('PayeeDetailsFunction', {
     }
   }
 });
+
+
+
+    const mergedData = data2
+      .filter(owner => owner.Owner.Id === data1.PayeeId)
+      .map(owner => {
+        // Match on payeeCode to extract Status from data4
+        const statusEntry = Array.isArray(data4)
+          ? data4.find(entry => entry.payeeCode === data1.payeeCode)
+          : data4[data1.payeeCode]; // fallback if data4 is an object
+
+        return {
+          ...data1,
+          ...owner,
+          PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue,
+          Status: statusEntry?.Status // Include the Status from data4
+        };
+      });
+
+    return mergedData;
