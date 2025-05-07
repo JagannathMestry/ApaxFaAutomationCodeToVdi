@@ -59,3 +59,10 @@ app.http('FilterAndPostFunction', {
         }
     }
 });
+
+
+
+            const filtered = data.filter(item =>
+                payeecodes.includes(item.payeecode?.toLowerCase()) &&
+                (!statusParam || item.status?.toLowerCase() === statusParam.toLowerCase())
+            );
