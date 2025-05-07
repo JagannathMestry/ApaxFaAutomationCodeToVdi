@@ -1,4 +1,5 @@
 const { app } = require('@azure/functions');
+const fetch = require('node-fetch'); // Ensure 'node-fetch' is installed
 
 const PATCH_API_URL = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/payee/patch';
 
@@ -18,21 +19,32 @@ app.http('PayeePatchFunction', {
 
         const payeeCodes = payeeCodesParam.split(',').map(code => code.trim());
 
-        const body = payeeCodes.map(code => ({
-            PayeeCode: code,
-            PayeeDescription: {
-                Fields: {
-                    IsActive: isActive
-                }
-            }
-        }));
+        // Initialize a counter for _correlationId
+        let correlationId = 1;
+
+        const body = payeeCodes.map(code => {
+            const requestBody = {
+                PayeeCode: code,
+                PayeeDescription: {
+                    Fields: {
+                        IsActive: isActive
+                    }
+                },
+                _correlationId: correlationId // Add _correlationId
+            };
+
+            // Increment the correlationId for the next item
+            correlationId++;
+
+            return requestBody;
+        });
 
         try {
             const response = await fetch(PATCH_API_URL, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer '
+                    'Authorization': 'Bearer 13'
                 },
                 body: JSON.stringify(body)
             });
