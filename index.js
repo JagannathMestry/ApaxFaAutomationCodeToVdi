@@ -1,40 +1,52 @@
 const { app } = require('@azure/functions');
 
-app.http('LoginFunction', {
-    methods: ['POST'],
-    authLevel: 'anonymous',
-    handler: async (request, context) => {
-        const { Username, Password } = await request.json();
+const PATCH_API_URL = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/payee/patch';
 
-        if (!Username || !Password) {
+app.http('PayeePatchFunction', {
+    methods: ['PATCH'],
+    authLevel: 'anonymous', // Adjust the authentication level as needed
+    handler: async (req, context) => {
+        const payeeCodesParam = req.query.get('payeeCodes') || '';
+        const isActive = req.query.get('isActive');
+
+        if (!payeeCodesParam || typeof isActive === 'undefined') {
             return {
                 status: 400,
-                jsonBody: { error: "Username and Password are required." }
+                jsonBody: 'Please provide both "payeeCodes" and "isActive" query parameters.'
             };
         }
 
-        const API_URL = 'https://login.microsoftonline.com/common/oauth2/token'; // Must use HTTPS
-        const HEADERS = {
-            'Content-Type': 'application/json'
-        };
+        const payeeCodes = payeeCodesParam.split(',').map(code => code.trim());
+
+        const body = payeeCodes.map(code => ({
+            PayeeCode: code,
+            PayeeDescription: {
+                Fields: {
+                    IsActive: isActive
+                }
+            }
+        }));
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: HEADERS,
-                body: JSON.stringify({ Username, Password })
+            const response = await fetch(PATCH_API_URL, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer '
+                },
+                body: JSON.stringify(body)
             });
 
-            const data = await response.json();
+            const result = await response.json();
 
             return {
                 status: response.status,
-                jsonBody: data
+                jsonBody: result
             };
         } catch (error) {
             return {
                 status: 500,
-                jsonBody: { error: error.message }
+                jsonBody: `Error sending PATCH request: ${error.message}`
             };
         }
     }
