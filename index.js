@@ -1,64 +1,61 @@
 const { app } = require('@azure/functions');
-const fetch = require('node-fetch'); // Ensure 'node-fetch' is installed
+const fetch = require('node-fetch'); // Ensure you have this installed
 
-const PATCH_API_URL = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/payee/patch';
+const API_URL = 'https://your-api-url.com/endpoint'; // Replace with actual API URL
 
-app.http('PayeePatchFunction', {
-    methods: ['PATCH'],
-    authLevel: 'anonymous', // Adjust the authentication level as needed
+app.http('FilterPayeeStatus', {
+    methods: ['GET'],
+    authLevel: 'anonymous',
     handler: async (req, context) => {
-        const payeeCodesParam = req.query.get('payeeCodes') || '';
-        const isActive = req.query.get('isActive');
+        const payeecode = req.query.get('payeecode');
+        const status = req.query.get('status'); // Optional
 
-        if (!payeeCodesParam || typeof isActive === 'undefined') {
+        if (!payeecode) {
             return {
                 status: 400,
-                jsonBody: 'Please provide both "payeeCodes" and "isActive" query parameters.'
+                jsonBody: { error: 'Missing required query parameter: payeecode' }
             };
         }
 
-        const payeeCodes = payeeCodesParam.split(',').map(code => code.trim());
-
-        // Initialize a counter for _correlationId
-        let correlationId = 1;
-
-        const body = payeeCodes.map(code => {
-            const requestBody = {
-                PayeeCode: code,
-                PayeeDescription: {
-                    Fields: {
-                        IsActive: isActive
-                    }
-                },
-                _correlationId: correlationId // Add _correlationId
-            };
-
-            // Increment the correlationId for the next item
-            correlationId++;
-
-            return requestBody;
-        });
-
         try {
-            const response = await fetch(PATCH_API_URL, {
-                method: 'PATCH',
+            const response = await fetch(API_URL, {
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer 13'
+                    'Authorization': 'Bearer YOUR_TOKEN' // Optional
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify({}) // Add request body here if needed
             });
 
-            const result = await response.json();
+            const data = await response.json();
+
+            if (!Array.isArray(data)) {
+                return {
+                    status: 500,
+                    jsonBody: { error: 'Unexpected response format from API' }
+                };
+            }
+
+            // Filter by payeecode (case-insensitive match)
+            let filtered = data.filter(item =>
+                item.payeecode?.toLowerCase() === payeecode.toLowerCase()
+            );
+
+            // Optionally filter by status
+            if (status) {
+                filtered = filtered.filter(item =>
+                    item.status?.toLowerCase() === status.toLowerCase()
+                );
+            }
 
             return {
-                status: response.status,
-                jsonBody: result
+                status: 200,
+                jsonBody: filtered
             };
         } catch (error) {
             return {
                 status: 500,
-                jsonBody: `Error sending PATCH request: ${error.message}`
+                jsonBody: { error: `API call failed: ${error.message}` }
             };
         }
     }
