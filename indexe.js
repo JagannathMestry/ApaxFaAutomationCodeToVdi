@@ -1,101 +1,74 @@
 const { app } = require('@azure/functions');
 
-app.http('PayeeDetailsFunction', {
-  methods: ['GET'],
+app.http('ProcessPayees', {
+  methods: ['POST'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
+    context.log(`Http function processed request for url "${request.url}"`);
+
     try {
-      const baseUrl1 = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/sia/';
-      const baseUrl2 = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/ssi/';
-      const baseUrl3 = 'https://8ceaa6f6-5df8-4513-8a12-2869ace3d8d1.mock.pstmn.io/attribute/';
+      const payees = await request.json();
 
-      const headers = {
-        Authorization: 'Bearer 123',
-        'Content-Type': 'application/json'
-      };
-
-      const payeecodes = (request.query.get('payeecodes') || '')
-        .split(',')
-        .map(code => code.trim())
-        .filter(Boolean);
-
-      const currencyCodeParam = request.query.get('currencycode');
-      const currencyCodeFilter = currencyCodeParam
-        ? currencyCodeParam.split(',').map(c => c.trim().toUpperCase())
-        : null;
-
-      if (payeecodes.length === 0) {
+      if (!Array.isArray(payees)) {
         return {
           status: 400,
-          jsonBody: { error: 'Missing required query parameter: payeecodes' }
+          jsonBody: { error: 'Request body must be an array of objects.' }
         };
       }
 
-      const results = await Promise.all(
-        payeecodes.map(async (code) => {
-          const [res1, res2, res3] = await Promise.all([
-            fetch(`${baseUrl1}${code}`, { method: 'GET', headers }),
-            fetch(`${baseUrl2}${code}`, { method: 'GET', headers }),
-            fetch(`${baseUrl3}${code}`, { method: 'GET', headers })
-          ]);
+      const api1Url = process.env.API1_URL;
+      const api2Url = process.env.API2_URL;
 
-          const [data1, data2, data3] = await Promise.all([
-            res1.json(),
-            res2.json(),
-            res3.json()
-          ]);
+      const payloadApi1 = [];
+      const payloadApi2 = [];
 
-          const attr = data3["0"];
-          const attributeData = (attr?.Payee?.PayeeId === data1.PayeeId) ? attr : null;
+      // Build both payloads with correlation_id
+      payees.forEach((payee, index) => {
+        const correlationId = index + 1;
 
-          const mergedData = data2
-            .filter(owner => owner.Owner.Id === data1.PayeeId)
-            .map(owner => ({
-              ...data1,
-              ...owner,
-              PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue
-            }));
+        payloadApi1.push({
+          payeeCode: payee.PayeeCode,
+          currency: payee.CurrencyCode,
+          correlation_id: correlationId,
+          timestamp: new Date().toISOString()
+          // Add any additional fields for API 1
+        });
 
-          return mergedData
-            .filter(item =>
-              !currencyCodeFilter ||
-              currencyCodeFilter.includes(item.Currency?.currencyCode?.toUpperCase())
-            )
-            .map(item => ({
-              PayeeCode: item.PayeeCode,
-              PayeeId: item.PayeeId,
-              CurrencyCode: item.Currency?.currencyCode ?? null,
-              BeneficiaryBankSwiftCode: item.InstitutionBank.BankAccount.Bic,
-              BeneficiaryAccName: item.FinalBeneficiary.BankAccount.BankAccountName,
-              BeneficiaryAccnoIBAN: item.InstitutionBank.BankAccount.Iban,
-              BeneficiaryBankName: item.InstitutionBank.BankAddress.Name,
-              BeneficiaryBankAddress1: item.InstitutionBank.BankAddress.AddressLine1,
-              BeneficiaryBankAddress2: item.InstitutionBank.BankAddress.AddressLine2,
-              BeneficiaryBankCountry: item.InstitutionBank.BankAddress.Country.CountryCode,
-              BeneficiaryBankABAnumber: item.InstitutionBank.BankAccount.CountryIdentifier,
-              BeneficiaryBankSortNumber: item.InstitutionBank.BankAccount.CountryIdentifier,
-              SpecialInstructionsLine1: (item.BankSenderToReceiverInfo?.Notes || '').split('\n')[0] || '',
-              SpecialInstructionsLine2: (item.BankSenderToReceiverInfo?.Notes || '').split('\n')[1] || '',
-              SpecialInstructionsLine3: (item.BankSenderToReceiverInfo?.Notes || '').split('\n')[2] || '',
-              SpecialInstructionsLine5: item.PayeeAttributeFieldValue,
-              BeneficiaryPartyAddress1: item.FinalBeneficiary.BankAddress.AddressLine1,
-              BeneficiaryPartyAddress2: item.FinalBeneficiary.BankAddress.AddressLine2,
-              BeneficiaryBankAccNo: item.FinalBeneficiary.BankAccount.Iban,
-              IntermediaryBankName: item.IntermediaryBank.BankAddress.Name,
-              IntermediaryBankAddress1: item.IntermediaryBank.BankAddress.AddressLine1,
-              IntermediaryBankAddress2: item.IntermediaryBank.BankAddress.AddressLine2,
-              IntermediaryBankSwiftCode: item.IntermediaryBank.BankAccount.Bic,
-              IntermediaryBankABANumber: item.IntermediaryBank.BankAccount.CountryIdentifier
-            }));
-        })
-      );
+        payloadApi2.push({
+          bankName: payee.BankName,
+          sortCode: payee.BankSortCode,
+          correlation_id: correlationId,
+          metadata: 'additional data here'
+          // Add any additional fields for API 2
+        });
+      });
+
+      // Make PATCH requests using built-in fetch
+      const res1 = await fetch(api1Url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadApi1)
+      });
+
+      const res2 = await fetch(api2Url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadApi2)
+      });
+
+      const res1Json = await res1.json();
+      const res2Json = await res2.json();
 
       return {
         status: 200,
-        jsonBody: results.flat()
+        jsonBody: {
+          message: 'Payees processed successfully in bulk',
+          api1Response: res1Json,
+          api2Response: res2Json
+        }
       };
-
     } catch (err) {
+      context.log.error('Error processing payees:', err);
       return {
         status: 500,
         jsonBody: { error: err.message }
@@ -103,23 +76,3 @@ app.http('PayeeDetailsFunction', {
     }
   }
 });
-
-
-
-    const mergedData = data2
-      .filter(owner => owner.Owner.Id === data1.PayeeId)
-      .map(owner => {
-        // Match on payeeCode to extract Status from data4
-        const statusEntry = Array.isArray(data4)
-          ? data4.find(entry => entry.payeeCode === data1.payeeCode)
-          : data4[data1.payeeCode]; // fallback if data4 is an object
-
-        return {
-          ...data1,
-          ...owner,
-          PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue,
-          Status: statusEntry?.Status // Include the Status from data4
-        };
-      });
-
-    return mergedData;
