@@ -68,3 +68,45 @@ app.http('ProcessPayees', {
     };
   }
 });
+
+
+
+
+[
+    {
+        "Owner": {
+            "Code": "12964",
+            "EntityType": "Payee"
+        },
+        "Currency": {
+            "currencyCode": "USD"
+        },
+        "IntermediaryBank": {
+            "BankAddress": {
+                "Name": "string",
+                "AddressLine1": "123432",
+                "AddressLine2": "stirng"
+            },
+            "BankAccount": {
+                "Bic": "12345678",
+                "CountryIdentifier": "123"
+            }
+        },
+        "InstitutionBank": {
+            "BankAddress": {
+                "Name": "BOFAUS3N122",
+                "AddressLine1": "BOFAUS3Ndas",
+                "AddressLine2": "BOFAUS3Nwdw",
+                "CountryCode": "US"
+            },
+            "BankAccount": {
+                "Iban": "BOFAUS3N2323",
+                "Bic": "BOFAUS3N",
+                "CountryIdentifier": "US"
+            }
+        },
+        "BankSenderToReceiverInfo": {
+            "Notes": "string"
+        }
+    }
+]
