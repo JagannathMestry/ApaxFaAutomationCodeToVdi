@@ -87,7 +87,7 @@ app.http('PayeeDetailsFunction', {
         status: 200,
         jsonBody: results.flat()
       };
-
+https://.azurewebsites.net/api/?payeecodes=19667
     } catch (err) {
       return {
         status: 500,
