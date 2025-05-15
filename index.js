@@ -51,10 +51,7 @@ app.http('fetchPayeeDetails', {
         };
       }
 
-      let successful = 0;
-      let partial = 0;
-      let failed = 0;
-
+      let successCount = 0;
       const results = await Promise.all(
         payeecodes.map(async (code) => {
           try {
@@ -64,28 +61,18 @@ app.http('fetchPayeeDetails', {
               fetch(`${baseUrl3}${code}/attributes`, { method: 'GET', headers })
             ]);
 
-            const errorStatuses = [res1.status, res2.status, res3.status];
-            if (errorStatuses.some(status => status >= 500)) {
-              failed++;
+            if (!res1.ok || !res2.ok || !res3.ok) {
               return [{
                 PayeeCode: code,
-                error: `Internal Server Error fetching details for ${code}`
+                error: `Error fetching data for ${code} (statuses: ${res1.status}, ${res2.status}, ${res3.status})`
               }];
             }
 
             const [data1, data2, data3] = await Promise.all([
-              res1.ok ? res1.json() : null,
-              res2.ok ? res2.json() : null,
-              res3.ok ? res3.json() : null
+              res1.json(),
+              res2.json(),
+              res3.json()
             ]);
-
-            if (!data1 || !data2 || !data3) {
-              partial++;
-              return [{
-                PayeeCode: code,
-                error: `Partial data found for ${code}`
-              }];
-            }
 
             const attr = data3["0"];
             const attributeData = (attr?.Payee?.PayeeId === data1.PayeeId) ? attr : null;
@@ -116,18 +103,16 @@ app.http('fetchPayeeDetails', {
               }));
 
             if (filtered.length === 0) {
-              partial++;
               return [{
                 PayeeCode: code,
                 error: `No matching currency found for ${code}`
               }];
             }
 
-            successful++;
+            successCount++;
             return filtered;
 
           } catch (err) {
-            failed++;
             return [{
               PayeeCode: code,
               error: `Unexpected error for ${code}: ${err.message}`
@@ -136,16 +121,18 @@ app.http('fetchPayeeDetails', {
         })
       );
 
+      const flatResults = results.flat();
       let finalStatus = 200;
-      if (successful === 0 && (partial > 0 || failed > 0)) {
+
+      if (successCount === 0) {
         finalStatus = 404;
-      } else if (partial > 0 || failed > 0) {
+      } else if (successCount < payeecodes.length) {
         finalStatus = 207;
       }
 
       return {
         status: finalStatus,
-        jsonBody: results.flat()
+        jsonBody: flatResults
       };
 
     } catch (err) {
