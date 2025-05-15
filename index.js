@@ -8,7 +8,7 @@ app.http('fetchPayeeDetails', {
       const baseUrl1 = `/payees/code/`;
       const baseUrl2 = `/payees/code/`;
       const baseUrl3 = `/payees/`;
-      const additionalFunctionUrl = 'https://hazeltreebankchangesdevfunctionapp.azurewebsites.net/api/checkpayeestatus';
+      const additionalFunctionUrl = 'https://asd.azurewebsites.net/api/';
 
       const headers = {
         Authorization: 'Bearer 123',
@@ -29,27 +29,33 @@ app.http('fetchPayeeDetails', {
       if (payeecodes.length === 0) {
         return {
           status: 400,
-          jsonBody: [{ error: 'Missing required query parameter: payeecodes' }]
+          jsonBody: { error: 'Missing required query parameter: payeecodes' }
         };
       }
 
-      // Fetch additional payee status
       let additionalDataArray = [];
       try {
         const additionalRes = await fetch(`${additionalFunctionUrl}?payeecodes=${payeecodes.join(',')}`, {
           method: 'GET'
         });
+
+        if (!additionalRes.ok) {
+          throw new Error(`Additional API failed with status ${additionalRes.status}`);
+        }
+
         additionalDataArray = await additionalRes.json();
-      } catch (err) {
+      } catch (error) {
         return {
           status: 500,
-          jsonBody: [{ error: 'Failed to fetch from checkpayeestatus API' }]
+          jsonBody: { error: 'Failed to fetch from additional API', detail: error.message }
         };
       }
 
-      let allResults = [];
+      let successful = 0;
+      let partial = 0;
+      let failed = 0;
 
-      await Promise.all(
+      const results = await Promise.all(
         payeecodes.map(async (code) => {
           try {
             const [res1, res2, res3] = await Promise.all([
@@ -58,20 +64,28 @@ app.http('fetchPayeeDetails', {
               fetch(`${baseUrl3}${code}/attributes`, { method: 'GET', headers })
             ]);
 
-            if (!res1.ok || !res2.ok || !res3.ok) {
-              allResults.push({
+            const errorStatuses = [res1.status, res2.status, res3.status];
+            if (errorStatuses.some(status => status >= 500)) {
+              failed++;
+              return [{
                 PayeeCode: code,
-                error: `One or more API calls failed`,
-                status: [res1.status, res2.status, res3.status]
-              });
-              return;
+                error: `Internal Server Error fetching details for ${code}`
+              }];
             }
 
             const [data1, data2, data3] = await Promise.all([
-              res1.json(),
-              res2.json(),
-              res3.json()
+              res1.ok ? res1.json() : null,
+              res2.ok ? res2.json() : null,
+              res3.ok ? res3.json() : null
             ]);
+
+            if (!data1 || !data2 || !data3) {
+              partial++;
+              return [{
+                PayeeCode: code,
+                error: `Partial data found for ${code}`
+              }];
+            }
 
             const attr = data3["0"];
             const attributeData = (attr?.Payee?.PayeeId === data1.PayeeId) ? attr : null;
@@ -81,59 +95,63 @@ app.http('fetchPayeeDetails', {
               .map(owner => {
                 const additionalMatch = additionalDataArray.find(a => a.PayeeCode === data1.PayeeCode);
                 return {
-                  PayeeCode: data1.PayeeCode,
-                  PayeeId: data1.PayeeId,
-                  PayeeName: data1.PayeeDescription?.Name,
+                  ...data1,
+                  ...owner,
                   PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue,
                   PayeeAttributeFieldId: attributeData?.PayeeAttributeField?.PayeeAttributeFieldId,
                   PayeeAttributeFieldCode: attributeData?.PayeeAttributeField?.PayeeAttributeFieldCode,
-                  Status: additionalMatch?.Status,
-                  Currency: owner.Currency?.currencyCode
+                  Status: additionalMatch?.Status
                 };
               });
 
-            const filtered = mergedData.filter(item =>
-              !currencyCodeFilter || currencyCodeFilter.includes(item.Currency?.toUpperCase())
-            );
+            const filtered = mergedData
+              .filter(item =>
+                !currencyCodeFilter ||
+                currencyCodeFilter.includes(item.Currency?.currencyCode?.toUpperCase())
+              )
+              .map(item => ({
+                PayeeCode: item.PayeeCode,
+                PayeeId: item.PayeeId,
+                PayeeName: item.PayeeDescription?.Name
+              }));
 
             if (filtered.length === 0) {
-              allResults.push({
+              partial++;
+              return [{
                 PayeeCode: code,
-                error: 'No matching currency code or data found'
-              });
-            } else {
-              allResults.push(...filtered.map(({ Currency, ...rest }) => rest)); // drop internal Currency key
+                error: `No matching currency found for ${code}`
+              }];
             }
 
+            successful++;
+            return filtered;
+
           } catch (err) {
-            allResults.push({
+            failed++;
+            return [{
               PayeeCode: code,
-              error: err.message
-            });
+              error: `Unexpected error for ${code}: ${err.message}`
+            }];
           }
         })
       );
 
-      // Determine response status
-      const hasSuccess = allResults.some(item => !item.error);
-      const hasFailure = allResults.some(item => item.error);
-
-      let status = 200;
-      if (hasSuccess && hasFailure) {
-        status = 207;
-      } else if (!hasSuccess && hasFailure) {
-        status = 404;
+      let finalStatus = 200;
+      if (successful === 0 && (partial > 0 || failed > 0)) {
+        finalStatus = 404;
+      } else if (partial > 0 || failed > 0) {
+        finalStatus = 207;
       }
 
       return {
-        status,
-        jsonBody: allResults
+        status: finalStatus,
+        jsonBody: results.flat()
       };
 
     } catch (err) {
       return {
         status: 500,
-        jsonBody: [{ error: 'Internal server error: ' + err.message }]
+        jsonBody: { error: 'Internal Server Error', detail: err.message }
       };
     }
   }
