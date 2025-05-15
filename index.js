@@ -18,7 +18,7 @@ app.http('fetchPayeeDetails', {
       const payeecode = request.query.get('payeecodes');
       const payeecodes = (payeecode || '')
         .split(',')
-        .map(code => code.trim())
+        .map(code => String(code.trim()))
         .filter(Boolean);
 
       const currencyCodeParam = request.query.get('currencycode');
@@ -39,6 +39,13 @@ app.http('fetchPayeeDetails', {
           method: 'GET'
         });
 
+        if (additionalRes.status === 401) {
+          return {
+            status: 401,
+            jsonBody: { error: 'Unauthorized to access additional API.' }
+          };
+        }
+
         if (!additionalRes.ok) {
           throw new Error(`Additional API failed with status ${additionalRes.status}`);
         }
@@ -52,6 +59,7 @@ app.http('fetchPayeeDetails', {
       }
 
       let successCount = 0;
+
       const results = await Promise.all(
         payeecodes.map(async (code) => {
           try {
@@ -61,33 +69,42 @@ app.http('fetchPayeeDetails', {
               fetch(`${baseUrl3}${code}/attributes`, { method: 'GET', headers })
             ]);
 
-            if (!res1.ok || !res2.ok || !res3.ok) {
+            if ([res1, res2, res3].some(res => res.status === 401)) {
               return [{
                 PayeeCode: code,
-                error: `Error fetching data for ${code} (statuses: ${res1.status}, ${res2.status}, ${res3.status})`
+                error: `Unauthorized access while fetching data for ${code}`
+              }];
+            }
+
+            if (!res1.ok || !res2.ok) {
+              return [{
+                PayeeCode: code,
+                error: `Error fetching data for ${code} (res1: ${res1.status}, res2: ${res2.status})`
               }];
             }
 
             const [data1, data2, data3] = await Promise.all([
               res1.json(),
               res2.json(),
-              res3.json()
+              res3.status === 404 ? Promise.resolve("") : res3.json()
             ]);
 
-            const attr = data3["0"];
+            const attr = typeof data3 === 'string' ? null : data3["0"];
             const attributeData = (attr?.Payee?.PayeeId === data1.PayeeId) ? attr : null;
 
             const mergedData = data2
               .filter(owner => owner.Owner.Id === data1.PayeeId)
               .map(owner => {
-                const additionalMatch = additionalDataArray.find(a => a.PayeeCode === data1.PayeeCode);
+                const additionalMatch = additionalDataArray.find(
+                  a => String(a.PayeeCode) === String(data1.PayeeCode)
+                );
                 return {
                   ...data1,
                   ...owner,
-                  PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue,
-                  PayeeAttributeFieldId: attributeData?.PayeeAttributeField?.PayeeAttributeFieldId,
-                  PayeeAttributeFieldCode: attributeData?.PayeeAttributeField?.PayeeAttributeFieldCode,
-                  Status: additionalMatch?.Status
+                  PayeeAttributeFieldValue: attributeData?.PayeeAttributeFieldValue || "",
+                  PayeeAttributeFieldId: attributeData?.PayeeAttributeField?.PayeeAttributeFieldId || "",
+                  PayeeAttributeFieldCode: attributeData?.PayeeAttributeField?.PayeeAttributeFieldCode || "",
+                  Status: additionalMatch?.Status || ""
                 };
               });
 
@@ -125,7 +142,9 @@ app.http('fetchPayeeDetails', {
       let finalStatus = 200;
 
       if (successCount === 0) {
-        finalStatus = 404;
+        // Check if all errors are due to 401
+        const allUnauthorized = flatResults.every(r => r.error && r.error.includes('Unauthorized'));
+        finalStatus = allUnauthorized ? 401 : 404;
       } else if (successCount < payeecodes.length) {
         finalStatus = 207;
       }
